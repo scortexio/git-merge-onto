@@ -27,7 +27,7 @@ from pathlib import Path
 
 try:
     __version__ = _pkg_version("git-merge-onto")
-except PackageNotFoundError:  # running from a source tree with no install
+except PackageNotFoundError:  # pragma: no cover - running from a source tree with no install
     __version__ = "0+unknown"
 
 # Point at a specific git binary (used by the test suite; "git" otherwise).
@@ -109,11 +109,8 @@ def git_dir() -> Path:
     return Path(git("rev-parse", "--absolute-git-dir"))
 
 
-def worktree_dirty(include_untracked: bool = True) -> bool:
-    args = ["status", "--porcelain"]
-    if not include_untracked:
-        args.append("--untracked-files=no")
-    return bool(git(*args))
+def worktree_dirty() -> bool:
+    return bool(git("status", "--porcelain"))
 
 
 def in_progress_merge() -> bool:
