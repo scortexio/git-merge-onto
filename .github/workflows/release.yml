@@ -1,0 +1,49 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+
+# No permissions by default; each job opts into the minimum it needs.
+permissions: {}
+
+jobs:
+  # On every push to main, open or update a release PR. Merging that PR tags the
+  # release and sets releases_created, which gates the publish job below.
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  publish:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+    runs-on: ubuntu-latest
+    # Add a required-reviewer rule to this environment to require manual approval
+    # before any publish. The name must match the PyPI trusted-publisher config.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/git-merge-onto
+    permissions:
+      contents: read
+      id-token: write # OIDC for PyPI Trusted Publishing; no token is stored
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      - name: Run the tests
+        run: uv run pytest -q
+      - name: Build
+        run: uv build
+      - name: Publish to PyPI via trusted publishing
+        run: uv publish --trusted-publishing always
