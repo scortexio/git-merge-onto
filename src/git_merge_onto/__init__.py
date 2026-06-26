@@ -21,9 +21,14 @@ import os
 import shlex
 import subprocess
 import sys
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
-__version__ = "0.1.0"
+try:
+    __version__ = _pkg_version("git-merge-onto")
+except PackageNotFoundError:  # running from a source tree with no install
+    __version__ = "0+unknown"
 
 # Point at a specific git binary (used by the test suite; "git" otherwise).
 GIT = os.environ.get("GIT_MERGE_ONTO_GIT", "git")
@@ -115,6 +120,23 @@ def in_progress_merge() -> bool:
     return (git_dir() / "MERGE_HEAD").exists()
 
 
+def blocking_operation() -> str | None:
+    """Name of an in-progress git operation a merge would corrupt, or None. A merge
+    leaves MERGE_HEAD, but a paused rebase, cherry-pick, or revert can leave a clean
+    tree on a detached HEAD, which would otherwise slip past the dirty-tree guard and
+    let the merge commit onto the operation's temporary HEAD."""
+    gd = git_dir()
+    if (gd / "MERGE_HEAD").exists():
+        return "merge"
+    if (gd / "CHERRY_PICK_HEAD").exists():
+        return "cherry-pick"
+    if (gd / "REVERT_HEAD").exists():
+        return "revert"
+    if (gd / "rebase-merge").is_dir() or (gd / "rebase-apply").is_dir():
+        return "rebase"
+    return None
+
+
 def setup_merge_markers(theirs: str, message: str, head_tip: str) -> None:
     """Write the in-progress-merge state `git commit` reads to finalize a merge:
     parents come from HEAD + MERGE_HEAD, the message from MERGE_MSG."""
@@ -170,10 +192,11 @@ def merge_onto(new: str, old: str, message: str | None = None) -> bool:
     """Re-parent HEAD onto `new`, dropping `old`. Returns True on a clean merge
     (committed), False on a conflict (left in progress to resolve and commit).
     Raises UserError on a precondition failure (dirty tree, bad ref, no ancestor)."""
-    # merge-recursive writes straight into the index/worktree, so refuse to run on a
-    # dirty tree or over an existing merge rather than corrupt either.
-    if in_progress_merge():
-        raise UserError("a merge is already in progress; finish it or `git merge --abort` first")
+    # merge-recursive writes straight into the index/worktree, so refuse to run during
+    # another git operation or on a dirty tree rather than corrupt either.
+    op = blocking_operation()
+    if op is not None:
+        raise UserError(f"a {op} is already in progress; finish it or abort it first")
     if worktree_dirty():
         raise UserError("working tree is not clean; commit or stash your changes first")
     old_sha = _resolve_commit(old)

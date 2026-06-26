@@ -1,6 +1,8 @@
 """Behavioral tests against real git repos: the three re-parent regimes, conflict
 handling, and the precondition guards."""
 
+import subprocess
+
 import pytest
 
 import git_merge_onto as gmo
@@ -244,3 +246,103 @@ def test_main_bad_ref_returns_2(repo):
     sh(repo, "switch", "-q", "-c", "b")
     commit_file(repo, "b.txt", "B\n", "b")
     assert gmo.main(["main", "nope"]) == 2
+
+
+def test_forced_base_when_old_parent_advanced(repo):
+    # b forked from a at a1 (shared=v1). Branch a then advances: a2 sets shared=v2. The
+    # base must be merge-base(b, a)=a1, NOT a's current tip a2. With a1 as base, b never
+    # modified shared (v1==v1), so main's deletion of it applies cleanly; with a2 as base
+    # it is a modify/delete conflict. This is the only test where merge-base(HEAD, old)
+    # differs from old, so it is what makes the forced-base computation load-bearing.
+    commit_file(repo, "base.txt", "base\n", "main")
+    sh(repo, "switch", "-q", "-c", "a")
+    commit_file(repo, "shared.txt", "v1\n", "a1")
+    sh(repo, "switch", "-q", "-c", "b")
+    commit_file(repo, "b.txt", "B\n", "b")
+    sh(repo, "switch", "-q", "a")
+    commit_file(repo, "shared.txt", "v2\n", "a2 advances a past b's fork point")
+    sh(repo, "switch", "-q", "b")
+
+    assert gmo.merge_onto("main", "a") is True       # clean, not a modify/delete conflict
+    assert not gmo.in_progress_merge()
+    assert not (repo / "shared.txt").exists()         # old parent's content dropped
+    assert (repo / "b.txt").read_text() == "B\n"      # own change kept
+    assert out(repo, "diff", "--name-only", "main", "HEAD") == "b.txt"
+
+
+def test_clean_merge_when_tree_unchanged_but_new_not_ancestor(repo):
+    # develop carries shared content byte-identical to feature, so the merged tree equals
+    # HEAD's existing tree. The skip must NOT fire, because develop is not an ancestor: a
+    # real two-parent merge has to be recorded, or the PR head never reaches its new base.
+    commit_file(repo, "base.txt", "base\n", "main")
+    sh(repo, "switch", "-q", "-c", "feature")
+    commit_file(repo, "shared.txt", "v1\n", "feature")
+    sh(repo, "switch", "-q", "-c", "followup")
+    fu_old = commit_file(repo, "followup.txt", "F\n", "followup")
+    sh(repo, "switch", "-q", "-c", "develop", "main")
+    commit_file(repo, "shared.txt", "v1\n", "develop with identical shared content")
+    sh(repo, "switch", "-q", "followup")
+
+    old_tree = out(repo, "rev-parse", "HEAD^{tree}")
+    assert gmo.merge_onto("develop", "feature") is True
+    assert out(repo, "rev-parse", "HEAD") != fu_old             # a commit was made
+    assert out(repo, "rev-parse", "HEAD^{tree}") == old_tree    # even though the tree is unchanged
+    ps = parents(repo)
+    assert len(ps) == 2 and out(repo, "rev-parse", "develop") in ps
+    assert is_ancestor(repo, "develop", "HEAD")                 # new base is now reachable
+
+
+def test_refuses_during_rebase(repo):
+    commit_file(repo, "f.txt", "1\n", "c0")
+    commit_file(repo, "f.txt", "2\n", "c1")
+    commit_file(repo, "f.txt", "3\n", "c2")
+    # Pause a rebase with a failing --exec: clean tree, detached HEAD, rebase-merge present.
+    subprocess.run(["git", "rebase", "--exec", "false", "HEAD~2"], cwd=str(repo), capture_output=True)
+    assert (gmo.git_dir() / "rebase-merge").is_dir()
+    assert not gmo.worktree_dirty()  # the guard's blind spot: clean tree, op in progress
+
+    with pytest.raises(gmo.UserError, match="rebase"):
+        gmo.merge_onto("HEAD", "HEAD")  # refs are irrelevant; the guard fires first
+    sh(repo, "rebase", "--abort")
+
+
+@pytest.mark.parametrize("marker,name", [("CHERRY_PICK_HEAD", "cherry-pick"), ("REVERT_HEAD", "revert")])
+def test_refuses_during_sequencer_op(repo, marker, name):
+    commit_file(repo, "f.txt", "x\n", "main")
+    sh(repo, "switch", "-q", "-c", "b")
+    commit_file(repo, "b.txt", "B\n", "b")
+    (gmo.git_dir() / marker).write_text(out(repo, "rev-parse", "main") + "\n")
+
+    with pytest.raises(gmo.UserError, match=name):
+        gmo.merge_onto("main", "b")
+
+
+def test_resolve_commit_origin_fallback(repo):
+    commit_file(repo, "f.txt", "x\n", "main")
+    target = out(repo, "rev-parse", "main")
+    # A remote-tracking ref with no matching local branch: resolved via the origin/ DWIM.
+    sh(repo, "update-ref", "refs/remotes/origin/feature", target)
+    assert gmo._resolve_commit("feature") == target
+    assert gmo._resolve_commit("nope") is None
+
+
+def test_merge_abort_recovers_from_conflict(repo):
+    # The conflict message points the user at `git merge --abort`; it works only because
+    # the markers include ORIG_HEAD and MERGE_MODE, not just MERGE_HEAD/MERGE_MSG.
+    commit_file(repo, "f.txt", "1\n2\n3\n", "main")
+    sh(repo, "switch", "-q", "-c", "a")
+    commit_file(repo, "f.txt", "1\nA\n3\n", "a")
+    sh(repo, "switch", "-q", "-c", "b")
+    b_old = commit_file(repo, "f.txt", "1\nB\n3\n", "b")
+    sh(repo, "switch", "-q", "-c", "other", "main")
+    commit_file(repo, "f.txt", "1\nO\n3\n", "other")
+    sh(repo, "switch", "-q", "b")
+
+    assert gmo.merge_onto("other", "a") is False
+    assert gmo.in_progress_merge()
+
+    sh(repo, "merge", "--abort")
+    assert not gmo.in_progress_merge()
+    assert out(repo, "rev-parse", "HEAD") == b_old
+    assert (repo / "f.txt").read_text() == "1\nB\n3\n"
+    assert not gmo.worktree_dirty()
