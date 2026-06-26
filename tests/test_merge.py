@@ -1,7 +1,9 @@
 """Behavioral tests against real git repos: the three re-parent regimes, conflict
 handling, and the precondition guards."""
 
+import runpy
 import subprocess
+import sys
 
 import pytest
 
@@ -324,6 +326,41 @@ def test_resolve_commit_origin_fallback(repo):
     sh(repo, "update-ref", "refs/remotes/origin/feature", target)
     assert gmo._resolve_commit("feature") == target
     assert gmo._resolve_commit("nope") is None
+
+
+def test_verbose_echoes_command(capsys, monkeypatch):
+    # --quiet silences this; the default echoes each git command to stderr.
+    monkeypatch.setattr(gmo, "VERBOSE", True)
+    gmo._log_cmd(["git", "merge-recursive", "base"])
+    assert "Executing: git merge-recursive base" in capsys.readouterr().err
+
+
+def test_git_raises_command_error_on_failure(repo):
+    # A failing git command with check=True surfaces as CommandError.
+    with pytest.raises(gmo.CommandError):
+        gmo.git("rev-parse", "--verify", "definitely-not-a-ref")
+
+
+def test_main_reports_command_error(monkeypatch):
+    def boom(*_args):
+        raise gmo.CommandError(["git", "merge-recursive"], 3, "kaboom")
+
+    monkeypatch.setattr(gmo, "cmd_merge_onto", boom)
+    assert gmo.main(["--quiet", "new", "old"]) == 3
+
+
+def test_dunder_main_entrypoint(repo, monkeypatch):
+    # `python -m git_merge_onto` runs __main__.py, which calls sys.exit(main()).
+    commit_file(repo, "f.txt", "x\n", "main")
+    sh(repo, "switch", "-q", "-c", "a")
+    commit_file(repo, "a.txt", "A\n", "a")
+    sh(repo, "switch", "-q", "-c", "b")
+    commit_file(repo, "b.txt", "B\n", "b")
+    monkeypatch.setattr(sys, "argv", ["git-merge-onto", "--quiet", "main", "a"])
+
+    with pytest.raises(SystemExit) as excinfo:
+        runpy.run_module("git_merge_onto.__main__", run_name="__main__")
+    assert excinfo.value.code == 0
 
 
 def test_merge_abort_recovers_from_conflict(repo):
