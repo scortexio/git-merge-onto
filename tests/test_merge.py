@@ -116,6 +116,122 @@ def test_squash_regime_clean_where_plain_merge_conflicts(repo):
     assert len(parents(repo)) == 2 and out(repo, "rev-parse", "develop") in parents(repo)
 
 
+def test_absorbed_records_old_tip_as_parent(repo):
+    # The squash regime with the old parent advanced past the fork point: followup forked
+    # from feature at v1, feature advanced to v2, then was squash-merged into develop.
+    # Without --absorbed the re-parented followup does not descend from feature's tip, so
+    # a PR still based on feature reads as unmerged/conflicting; --absorbed records the
+    # tip as a parent and restores the ancestry.
+    commit_file(repo, "base.txt", "base\n", "main")
+    sh(repo, "switch", "-q", "-c", "feature")
+    commit_file(repo, "shared.txt", "v1\n", "feature v1")
+    sh(repo, "switch", "-q", "-c", "followup")
+    fu_old = commit_file(repo, "followup.txt", "F\n", "followup")
+    sh(repo, "switch", "-q", "feature")
+    feature_tip = commit_file(repo, "shared.txt", "v2\n", "feature v2")
+    sh(repo, "switch", "-q", "-c", "develop", "main")
+    commit_file(repo, "shared.txt", "v2\n", "squash of feature")
+    sh(repo, "switch", "-q", "followup")
+
+    assert gmo.main(["--quiet", "--absorbed", "develop", "feature"]) == 0
+
+    assert (repo / "shared.txt").read_text() == "v2\n"
+    assert out(repo, "diff", "--name-only", "develop", "HEAD") == "followup.txt"
+    ps = parents(repo)
+    assert len(ps) == 3
+    assert fu_old in ps and out(repo, "rev-parse", "develop") in ps and feature_tip in ps
+    assert is_ancestor(repo, "feature", "HEAD")
+
+
+def test_absorbed_redundant_when_old_is_ancestor(repo):
+    # When followup already contains feature's tip, the extra parent is redundant and
+    # `git commit` drops it: same two-parent commit as without the flag.
+    commit_file(repo, "base.txt", "base\n", "main")
+    sh(repo, "switch", "-q", "-c", "feature")
+    commit_file(repo, "shared.txt", "v1\n", "feature")
+    sh(repo, "switch", "-q", "-c", "followup")
+    fu_old = commit_file(repo, "followup.txt", "F\n", "followup")
+    sh(repo, "switch", "-q", "-c", "develop", "main")
+    commit_file(repo, "shared.txt", "v1-squashed\n", "squash of feature")
+    sh(repo, "switch", "-q", "followup")
+
+    assert gmo.merge_onto("develop", "feature", absorbed=True) is True
+
+    ps = parents(repo)
+    assert sorted(ps) == sorted([fu_old, out(repo, "rev-parse", "develop")])
+
+
+def test_absorbed_conflict_resolves_to_three_parents(repo):
+    # On a conflict the extra parent rides along in MERGE_HEAD, so the resolver's
+    # plain `git add`/`git commit` records it without knowing about the flag.
+    commit_file(repo, "f.txt", "1\n2\n3\n", "main")
+    sh(repo, "switch", "-q", "-c", "feature")
+    commit_file(repo, "f.txt", "1\nA\n3\n", "feature v1")
+    sh(repo, "switch", "-q", "-c", "followup")
+    fu_old = commit_file(repo, "f.txt", "1\nB\n3\n", "followup")
+    sh(repo, "switch", "-q", "feature")
+    feature_tip = commit_file(repo, "f.txt", "1\nA2\n3\n", "feature v2")
+    sh(repo, "switch", "-q", "-c", "develop", "main")
+    commit_file(repo, "f.txt", "1\nA2-squashed\n3\n", "squash of feature")
+    sh(repo, "switch", "-q", "followup")
+
+    assert gmo.merge_onto("develop", "feature", absorbed=True) is False
+    assert gmo.in_progress_merge()
+    assert "<<<<<<<" in (repo / "f.txt").read_text()
+
+    (repo / "f.txt").write_text("1\nB\n3\n")
+    sh(repo, "add", "f.txt")
+    sh(repo, "commit", "--no-edit")
+
+    ps = parents(repo)
+    assert len(ps) == 3
+    assert fu_old in ps and out(repo, "rev-parse", "develop") in ps and feature_tip in ps
+    assert is_ancestor(repo, "feature", "HEAD")
+
+
+def test_absorbed_bookkeeping_commit_when_tree_unchanged(repo):
+    # followup already has develop's content (a plain `git merge develop`, resolved by
+    # hand), so the re-parent changes nothing and develop is already an ancestor -- but
+    # feature's tip is not. The no-op skip must not fire: a tree-identical commit is
+    # created purely to record feature as merged.
+    commit_file(repo, "base.txt", "base\n", "main")
+    sh(repo, "switch", "-q", "-c", "feature")
+    commit_file(repo, "shared.txt", "v1\n", "feature v1")
+    sh(repo, "switch", "-q", "-c", "followup")
+    commit_file(repo, "followup.txt", "F\n", "followup")
+    sh(repo, "switch", "-q", "feature")
+    feature_tip = commit_file(repo, "shared.txt", "v2\n", "feature v2")
+    sh(repo, "switch", "-q", "-c", "develop", "main")
+    commit_file(repo, "shared.txt", "v2\n", "squash of feature")
+    sh(repo, "switch", "-q", "followup")
+    sh(repo, "checkout", "-q", "develop", "--", "shared.txt")
+    sh(repo, "commit", "-q", "-m", "hand-resolved merge of develop", "--", "shared.txt")
+    sh(repo, "merge", "-q", "--no-edit", "-s", "ours", "develop")  # develop now an ancestor
+    fu_merged = out(repo, "rev-parse", "HEAD")
+    old_tree = out(repo, "rev-parse", "HEAD^{tree}")
+
+    assert gmo.merge_onto("develop", "feature", absorbed=True) is True
+
+    assert out(repo, "rev-parse", "HEAD") != fu_merged            # a commit was made
+    assert out(repo, "rev-parse", "HEAD^{tree}") == old_tree      # with the same tree
+    ps = parents(repo)
+    assert sorted(ps) == sorted([fu_merged, feature_tip])         # develop dropped as redundant
+    assert is_ancestor(repo, "feature", "HEAD")
+
+
+def test_absorbed_noop_skip_when_old_also_ancestor(repo):
+    # Everything the flag would record is already an ancestor: the skip still fires and
+    # no commit is created.
+    commit_file(repo, "f.txt", "x\n", "main")
+    sh(repo, "switch", "-q", "-c", "a")
+    commit_file(repo, "a.txt", "A\n", "a")
+    sh(repo, "switch", "-q", "-c", "b")
+    b_old = commit_file(repo, "b.txt", "B\n", "b")
+
+    assert gmo.merge_onto("a", "a", absorbed=True) is True
+    assert out(repo, "rev-parse", "HEAD") == b_old
+
+
 def test_conflict_left_in_progress_then_resolved(repo):
     # Move b onto `other` (a sibling off main), dropping a. b and other touch the same
     # line, so the re-parent conflicts; other is not an ancestor of b, so the resolved
