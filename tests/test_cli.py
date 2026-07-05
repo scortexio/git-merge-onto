@@ -8,13 +8,13 @@ import git_merge_onto as gmo
 def test_parser_basic():
     args = gmo.build_parser().parse_args(["new", "old"])
     assert args.new == "new" and args.old == "old"
-    assert args.message is None and args.quiet is False
+    assert args.message is None and args.quiet is False and args.absorbed is False
 
 
 def test_parser_flags():
-    args = gmo.build_parser().parse_args(["-m", "msg", "--quiet", "develop", "feature"])
+    args = gmo.build_parser().parse_args(["-m", "msg", "--quiet", "--absorbed", "develop", "feature"])
     assert args.new == "develop" and args.old == "feature"
-    assert args.message == "msg" and args.quiet is True
+    assert args.message == "msg" and args.quiet is True and args.absorbed is True
 
 
 def test_parser_requires_two_positionals():

@@ -66,8 +66,31 @@ any merge: edit the files, `git add -A`, `git commit`.
 | flag | meaning |
 |------|---------|
 | `-m, --message <msg>` | commit message for a clean merge |
+| `--absorbed` | record `<old>` as an extra parent (see below) |
 | `--quiet` | do not echo the executed git commands |
 | `--version` | print the version |
+
+### `--absorbed`: mark the old parent as merged
+
+By default the re-parent *drops* `<old>`: the result does not descend from its
+tip, so git and GitHub keep treating `<old>` as unmerged. That is right when
+you pull a branch out from under a live parent, and wrong when `<new>` already
+carries `<old>`'s changes without its commits -- after a squash merge, a rebase
+merge, or a cherry-pick. `--absorbed` asserts the latter: `<old>`'s tip is
+recorded as an extra parent of the merge, so the result descends from it and
+git and GitHub treat `<old>` as merged.
+
+In the example above, with `git merge-onto --absorbed develop feature` the
+re-homed `followup` contains `feature`, so its PR stays mergeable (and CI keeps
+running) even while it is still based on `feature`, and GitHub shows `feature`
+as merged into it. If `feature`'s tip is already an ancestor the extra parent
+is redundant and git drops it, so the flag is safe to pass whenever the premise
+holds.
+
+This cannot be a default: whether `<old>`'s changes are already in `<new>` is a
+fact about how `<old>` landed, not something visible in the commit graph. When
+they are not (moving a branch off a live parent), the extra parent would
+falsely mark `<old>` as merged into your branch.
 
 ## How it works
 
