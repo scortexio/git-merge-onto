@@ -211,13 +211,22 @@ def merge_onto(new: str, old: str, message: str | None = None, absorbed: bool = 
     base = git("merge-base", "HEAD", old_sha, check=False)
     if not base:
         raise UserError(f"no common ancestor between HEAD and old parent {old!r}")
-    msg = message or f"Merge {new} into HEAD, dropping {old}"
-    return merge_with_base(base, new_sha, msg, extra_parent=old_sha if absorbed else None)
+    default = (
+        f"Merge {new}, which absorbed {old}, into HEAD"
+        if absorbed
+        else f"Merge {new} into HEAD, dropping {old}"
+    )
+    return merge_with_base(base, new_sha, message or default, extra_parent=old_sha if absorbed else None)
 
 
 def cmd_merge_onto(new: str, old: str, message: str | None, absorbed: bool = False) -> int:
     if merge_onto(new, old, message, absorbed=absorbed):
-        print(bold(f"git merge-onto: merged {new} into HEAD, dropping {old}."), file=sys.stderr)
+        done = (
+            f"merged {new}, which absorbed {old}, into HEAD"
+            if absorbed
+            else f"merged {new} into HEAD, dropping {old}"
+        )
+        print(bold(f"git merge-onto: {done}."), file=sys.stderr)
         return 0
     print(
         f"\n{bold('git merge-onto: conflict. Resolve it like a normal merge:')}\n"
