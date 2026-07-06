@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/scortexio/git-merge-onto/compare/v0.1.0...v0.2.0) (2026-07-05)
+
+
+### Features
+
+* add --absorbed to record the old parent as merged ([#3](https://github.com/scortexio/git-merge-onto/issues/3)) ([1c71a35](https://github.com/scortexio/git-merge-onto/commit/1c71a35bac0870bf977dae499a38c11dada0f875))
+
 ## 0.1.0 (2026-06-26)
 
 
