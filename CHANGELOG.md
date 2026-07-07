@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/scortexio/git-merge-onto/compare/v0.2.0...v0.3.0) (2026-07-07)
+
+
+### Features
+
+* say "which absorbed" instead of "dropping" under --absorbed ([#5](https://github.com/scortexio/git-merge-onto/issues/5)) ([f09cdf8](https://github.com/scortexio/git-merge-onto/commit/f09cdf80f76ff806f57920cf672b3855ff94aa57))
+
 ## [0.2.0](https://github.com/scortexio/git-merge-onto/compare/v0.1.0...v0.2.0) (2026-07-05)
 
 
