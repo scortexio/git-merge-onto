@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import shlex
 import subprocess
 import sys
 from importlib.metadata import PackageNotFoundError
@@ -37,10 +36,6 @@ except PackageNotFoundError:  # pragma: no cover - running from a source tree wi
 
 # Point at a specific git binary (used by the test suite; "git" otherwise).
 GIT = os.environ.get("GIT_MERGE_ONTO_GIT", "git")
-
-# Echo each executed git command to stderr (the transcript value of the tool:
-# you see that a re-parent is one `git merge-recursive`). Silenced by --quiet.
-VERBOSE = True
 
 
 class CommandError(RuntimeError):
@@ -67,21 +62,11 @@ def bold(text: str) -> str:
     return _ansi("1", text)
 
 
-def dim(text: str) -> str:
-    return _ansi("2", text)
-
-
 def red(text: str) -> str:
     return _ansi("31", text)
 
 
-def _log_cmd(argv: list[str]) -> None:
-    if VERBOSE:
-        print(dim("Executing: " + " ".join(shlex.quote(a) for a in argv)), file=sys.stderr)
-
-
 def run(argv: list[str], *, check: bool = True, capture: bool = True) -> subprocess.CompletedProcess:
-    _log_cmd(argv)
     proc = subprocess.run(
         argv,
         text=True,
@@ -272,7 +257,6 @@ def build_parser() -> argparse.ArgumentParser:
             "git and GitHub treat <old> as merged instead of dropped"
         ),
     )
-    p.add_argument("--quiet", action="store_true", help="do not echo executed git commands")
     p.add_argument("--version", action="version", version=f"git-merge-onto {__version__}")
     p.add_argument("new", help="the new parent to merge into HEAD")
     p.add_argument("old", help="the old parent to drop; the merge base is merge-base(HEAD, old)")
@@ -280,10 +264,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    global VERBOSE
     args = build_parser().parse_args(sys.argv[1:] if argv is None else argv)
-    if args.quiet:
-        VERBOSE = False
     try:
         return cmd_merge_onto(args.new, args.old, args.message, args.absorbed)
     except UserError as e:

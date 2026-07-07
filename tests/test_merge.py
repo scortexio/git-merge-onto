@@ -133,7 +133,7 @@ def test_absorbed_records_old_tip_as_parent(repo):
     commit_file(repo, "shared.txt", "v2\n", "squash of feature")
     sh(repo, "switch", "-q", "followup")
 
-    assert gmo.main(["--quiet", "--absorbed", "develop", "feature"]) == 0
+    assert gmo.main(["--absorbed", "develop", "feature"]) == 0
 
     assert (repo / "shared.txt").read_text() == "v2\n"
     assert out(repo, "diff", "--name-only", "develop", "HEAD") == "followup.txt"
@@ -347,7 +347,7 @@ def test_main_clean_returns_0(repo):
     commit_file(repo, "a.txt", "A\n", "a")
     sh(repo, "switch", "-q", "-c", "b")
     commit_file(repo, "b.txt", "B\n", "b")
-    assert gmo.main(["--quiet", "main", "a"]) == 0
+    assert gmo.main(["main", "a"]) == 0
 
 
 def test_main_conflict_returns_1(repo):
@@ -356,7 +356,7 @@ def test_main_conflict_returns_1(repo):
     commit_file(repo, "f.txt", "1\nA\n3\n", "a")
     sh(repo, "switch", "-q", "-c", "b")
     commit_file(repo, "f.txt", "1\nB\n3\n", "b")
-    assert gmo.main(["--quiet", "main", "a"]) == 1
+    assert gmo.main(["main", "a"]) == 1
 
 
 def test_main_bad_ref_returns_2(repo):
@@ -444,13 +444,6 @@ def test_resolve_commit_origin_fallback(repo):
     assert gmo._resolve_commit("nope") is None
 
 
-def test_verbose_echoes_command(capsys, monkeypatch):
-    # --quiet silences this; the default echoes each git command to stderr.
-    monkeypatch.setattr(gmo, "VERBOSE", True)
-    gmo._log_cmd(["git", "merge-recursive", "base"])
-    assert "Executing: git merge-recursive base" in capsys.readouterr().err
-
-
 def test_git_raises_command_error_on_failure(repo):
     # A failing git command with check=True surfaces as CommandError.
     with pytest.raises(gmo.CommandError):
@@ -462,7 +455,7 @@ def test_main_reports_command_error(monkeypatch):
         raise gmo.CommandError(["git", "merge-recursive"], 3, "kaboom")
 
     monkeypatch.setattr(gmo, "cmd_merge_onto", boom)
-    assert gmo.main(["--quiet", "new", "old"]) == 3
+    assert gmo.main(["new", "old"]) == 3
 
 
 def test_dunder_main_entrypoint(repo, monkeypatch):
@@ -472,7 +465,7 @@ def test_dunder_main_entrypoint(repo, monkeypatch):
     commit_file(repo, "a.txt", "A\n", "a")
     sh(repo, "switch", "-q", "-c", "b")
     commit_file(repo, "b.txt", "B\n", "b")
-    monkeypatch.setattr(sys, "argv", ["git-merge-onto", "--quiet", "main", "a"])
+    monkeypatch.setattr(sys, "argv", ["git-merge-onto", "main", "a"])
 
     with pytest.raises(SystemExit) as excinfo:
         runpy.run_module("git_merge_onto.__main__", run_name="__main__")

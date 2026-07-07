@@ -67,7 +67,6 @@ any merge: edit the files, `git add -A`, `git commit`.
 |------|---------|
 | `-m, --message <msg>` | commit message for a clean merge |
 | `--absorbed` | record `<old>` as an extra parent (see below) |
-| `--quiet` | do not echo the executed git commands |
 | `--version` | print the version |
 
 ### `--absorbed`: mark the old parent as merged
