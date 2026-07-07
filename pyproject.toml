@@ -1,6 +1,6 @@
 [project]
 name = "git-merge-onto"
-version = "0.2.0"
+version = "0.3.0"
 description = "Re-parent a branch by merge instead of rebase: the git merge equivalent of `git rebase --onto`, without rewriting history."
 readme = "README.md"
 requires-python = ">=3.9"
